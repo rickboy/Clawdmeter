@@ -1,0 +1,16 @@
+{
+  "name": "claude-usage-daemon",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@stoprocent/noble": "^1.9.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
