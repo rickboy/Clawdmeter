@@ -1,5 +1,5 @@
-# Install the Claude Usage Tracker daemon as a Windows Task Scheduler task.
-# Runs at login, restarts on failure. Requires Node 18+.
+# Install the Claude Usage Tracker daemon as a Task Scheduler task (no admin required).
+# Uses InteractiveToken logon so no password is stored.
 # Usage: .\install.ps1         (install)
 #        .\install.ps1 -Remove (uninstall)
 param(
@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $TaskName  = "ClaudeUsageDaemon"
 $DaemonDir = Join-Path $PSScriptRoot "daemon"
+$UserId    = "$env:USERDOMAIN\$env:USERNAME"
 
 if ($Remove) {
     Write-Host "=== Removing Claude Usage Tracker ==="
@@ -43,42 +44,64 @@ pnpm install
 Pop-Location
 Write-Host ""
 
-# Register Task Scheduler task
+# Register task via XML — InteractiveToken means no stored password, no admin needed
 Write-Host "[3/3] Registering scheduled task..."
 
-$NodeExe  = (Get-Command node).Source
-$Action   = New-ScheduledTaskAction `
-    -Execute $NodeExe `
-    -Argument "index.js" `
-    -WorkingDirectory $DaemonDir
+$NodeExe = (Get-Command node).Source
+$XmlPath = [System.IO.Path]::GetTempFileName() + ".xml"
 
-# At logon, any user
-$Trigger  = New-ScheduledTaskTrigger -AtLogOn
+# Task XML must be UTF-16 for schtasks
+$Xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>$UserId</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$UserId</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>$NodeExe</Command>
+      <Arguments>index.js</Arguments>
+      <WorkingDirectory>$DaemonDir</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
 
-# Restart up to 3 times on failure, 30s apart
-$Settings = New-ScheduledTaskSettingsSet `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Seconds 30) `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -MultipleInstances IgnoreNew
-
-Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action $Action `
-    -Trigger $Trigger `
-    -Settings $Settings `
-    -RunLevel Limited `
-    -Force | Out-Null
+try {
+    [System.IO.File]::WriteAllText($XmlPath, $Xml, [System.Text.Encoding]::Unicode)
+    schtasks /Create /TN $TaskName /XML $XmlPath /F
+    if ($LASTEXITCODE -ne 0) { throw "schtasks failed with exit code $LASTEXITCODE" }
+} finally {
+    Remove-Item $XmlPath -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "=== Done! ==="
 Write-Host ""
-Write-Host "Daemon registered as Task Scheduler task '$TaskName'."
-Write-Host "Starts automatically at login."
+Write-Host "Daemon starts automatically at login."
 Write-Host ""
-Write-Host "Useful commands:"
-Write-Host "  Start-ScheduledTask -TaskName $TaskName     # start now"
-Write-Host "  Stop-ScheduledTask  -TaskName $TaskName     # stop"
-Write-Host "  Get-ScheduledTask   -TaskName $TaskName     # status"
-Write-Host "  .\install.ps1 -Remove                       # uninstall"
+Write-Host "Start now:   schtasks /Run /TN $TaskName"
+Write-Host "Stop:        schtasks /End /TN $TaskName"
+Write-Host "Status:      schtasks /Query /TN $TaskName /FO LIST"
+Write-Host "Uninstall:   .\install.ps1 -Remove"
 Write-Host ""

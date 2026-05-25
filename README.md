@@ -31,43 +31,60 @@ While the splash is up, the middle button cycles animations instead of screens. 
 
 ## Prerequisites
 
-- Linux (tested on Ubuntu)
-- [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html)
-- `curl`, `bluetoothctl`, `busctl` (BlueZ Bluetooth stack)
+- [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html) — for building and flashing firmware
+- [Node.js](https://nodejs.org) 18+ and [pnpm](https://pnpm.io) — for the daemon
 - Claude Code with an active subscription
 
-## MacOS support
-
-MacOS is fully supported, that is as soon as you prompt it and create a pull request for it!
-
-I run Linux myself so it's harder for me to test this but anyone who wants MacOS support is welcome to contribute.
+Linux additionally requires `bluetoothctl` / `busctl` (BlueZ stack). Windows and macOS use the Node daemon which handles BLE natively.
 
 ## Flash the firmware
 
+Connect the device via USB-C. It appears as a serial port (`/dev/ttyACM0` on Linux, `COM*` on Windows — check Device Manager).
+
+**Windows:**
+```powershell
+.\flash.ps1 COM3
+```
+
+**Linux:**
 ```bash
-cd firmware
-pio run -t upload --upload-port /dev/ttyACM0
+./flash.sh /dev/ttyACM0
 ```
 
 ## Bluetooth pairing
 
-After flashing, the device advertises as "Claude Controller". Pair it once:
+The daemon pairs automatically on first run — no manual pairing needed on Windows or Linux.
 
-```bash
-# Scan for the device
-bluetoothctl scan le
-
-# When "Claude Controller" appears, pair and trust it
-bluetoothctl pair F4:12:FA:C0:8F:E5    # use your device's MAC
-bluetoothctl trust F4:12:FA:C0:8F:E5
-```
-
-The MAC address is shown on the Bluetooth screen — press the middle (PWR) button to cycle to it.
+The device MAC address is shown on the Bluetooth screen (press middle PWR button to cycle to it) if you ever need it.
 
 ## Install the daemon
 
-The daemon polls your Claude usage every 60 seconds and sends it to the display over BLE.
+The daemon polls your Claude usage every 60 seconds and sends it to the display over BLE. It auto-connects and reconnects without manual pairing.
 
+**Windows** — creates a startup shortcut (no admin required):
+```powershell
+.\install.ps1
+```
+
+Then start it now without waiting for a reboot:
+```powershell
+schtasks /Run /TN ClaudeUsageDaemon
+```
+
+Check status: `schtasks /Query /TN ClaudeUsageDaemon /FO LIST`
+
+Check it's running: `Get-Process node`
+
+View logs (run visibly in a terminal):
+```powershell
+cd daemon && node index.js
+```
+
+Uninstall: `.\install.ps1 -Remove`
+
+---
+
+**Linux** — installs as a systemd user service:
 ```bash
 ./install.sh
 systemctl --user start claude-usage-daemon
